@@ -3,7 +3,9 @@
 
 #include <string>
 
-static short port = 5555;
+static const short port = 5555;
+static const size_t MAX_LENGTH = 1024;
+static const std::string serverIp = "127.0.0.1";
 
 namespace Requests
 {
