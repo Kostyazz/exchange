@@ -28,13 +28,30 @@ private:
             type_(type),
             id_(++orderId)
         {}
+        Order() = delete;
+        Order(Order*) = delete;
+    };
+
+    struct User {
+    public:
+        static std::atomic<size_t> userId;
+        size_t id_;
+        std::string name_;
+        double usdBalance = 0;
+        double rubBalance = 0;
+        User(std::string name) :
+            name_(name),
+            id_(++userId)
+        {}
+        User() = delete;
+        User(User*) = delete;
     };
 
     // <UserId, UserName>
-    std::map<size_t, std::string> mUsers;
+    std::map<size_t, std::shared_ptr<User> > mUsers;
     std::shared_mutex mUsersMutex;
     // <price, *order>
-    std::multimap<double, std::shared_ptr<Order> > mBuyOrders;
+    std::multimap<double, std::shared_ptr<Order>, std::greater<double> > mBuyOrders;
     std::multimap<double, std::shared_ptr<Order> > mSellOrders;
     std::multimap<size_t, std::shared_ptr<Order> > mUserOrders;
     std::shared_mutex mOrdersMutex;
@@ -45,68 +62,55 @@ private:
     std::string RegisterNewUser(const std::string& aUserName)
     {
         mUsersMutex.lock();
-
-        size_t newUserId = mUsers.size();
-        mUsers[newUserId] = aUserName;
+        std::shared_ptr<User> newUser(std::make_shared<User>(aUserName));
+        size_t newUserId = newUser->id_;
+        mUsers[newUserId] = newUser;
 
         mUsersMutex.unlock();
         return std::to_string(newUserId);
-    }
-
-    // Запрос имени клиента по ID
-    std::string GetUserName(size_t userId)
-    {
-        mUsersMutex.lock_shared();
-
-        const auto userIt = mUsers.find(userId);
-        if (userIt == mUsers.cend())
-        {
-            return "Error! Unknown User";
-        }
-        else
-        {
-            return userIt->second;
-        }
-
-        mUsersMutex.unlock_shared();
     }
 
     //обработка сделок с новой заявкой
     void processNewOrder(std::shared_ptr<Order> newOrder) {
         //mutex locks before and after this function call
         
-        //if new order sells, check buy orders multimap
-        if (newOrder->type_ == orderType::sell) {
-            auto it = mBuyOrders.begin();
-            auto itEnd = mBuyOrders.end();
-            for ( ; it != itEnd && it->second->price_ >= newOrder->price_; ) {
-                auto oldOrder = it->second;
-                double price = oldOrder->price_;
-                double amount = std::min(oldOrder->amount_, newOrder->amount_);
-                oldOrder->amount_ -= amount;
-                newOrder->amount_ -= amount;
-                //todo change balances and notify users
-                if (oldOrder->amount_ <= 0) {
-                    it = mBuyOrders.erase(it);
-                } else
-                    it++;
+
+        //check buy orders multimap by default
+        auto it = mBuyOrders.begin();
+        auto itEnd = mBuyOrders.end();
+        bool typeIsBuy = newOrder->type_ == orderType::buy;
+        if (typeIsBuy) {
+            //if order is for buy, check sell orders multimap
+            it = mSellOrders.begin();
+            itEnd = mSellOrders.end();
+        }
+        for ( ; it != itEnd && 
+            (typeIsBuy ? it->second->price_ <= newOrder->price_
+                       : it->second->price_ >= newOrder->price_) ; ) {
+            std::shared_ptr<Order> oldOrder = it->second;
+            double price = oldOrder->price_;
+            double amount = std::min(oldOrder->amount_, newOrder->amount_);
+            oldOrder->amount_ -= amount;
+            newOrder->amount_ -= amount;
+            if (typeIsBuy) {
+                mUsers[oldOrder->userId_]->usdBalance -= amount;
+                mUsers[oldOrder->userId_]->rubBalance += price * amount;
+                mUsers[newOrder->userId_]->usdBalance += amount;
+                mUsers[newOrder->userId_]->rubBalance -= price * amount;                
+            } else {
+                mUsers[oldOrder->userId_]->usdBalance += amount;
+                mUsers[oldOrder->userId_]->rubBalance -= price * amount;
+                mUsers[newOrder->userId_]->usdBalance -= amount;
+                mUsers[newOrder->userId_]->rubBalance += price * amount;
             }
-        //check sell orders multimap
-        } else {
-            auto it = mSellOrders.begin();
-            auto itEnd = mSellOrders.end();
-            for (; it != itEnd && it->second->price_ <= newOrder->price_; ) {
-                auto oldOrder = it->second;
-                double price = oldOrder->price_;
-                double amount = std::min(oldOrder->amount_, newOrder->amount_);
-                oldOrder->amount_ -= amount;
-                newOrder->amount_ -= amount;
-                //todo change balances and notify users
-                if (oldOrder->amount_ <= 0) {
+            //TODO notify users
+            if (oldOrder->amount_ <= 0) {
+                if (typeIsBuy)
                     it = mSellOrders.erase(it);
-                } else
-                    it++;
-            }
+                else
+                    it = mBuyOrders.erase(it);
+            } else
+                it++;
         }
     }
 
@@ -127,7 +131,17 @@ private:
         }
 
         mOrdersMutex.unlock();
-        return "Your order was processed succesfully";
+        return "Your order has been processed succesfully";
+    }
+
+    std::string getBalance(size_t userId) {
+        std::shared_ptr<User> user = mUsers[userId];
+        mUsersMutex.lock_shared();
+
+        std::string retValue = "Your balance is: " + std::to_string(user->rubBalance) + " RUB, " + std::to_string(user->usdBalance) + " USD.";
+
+        mUsersMutex.unlock_shared();
+        return retValue;
     }
 
     class Session
@@ -139,6 +153,8 @@ private:
             parent(outer)
         {
         }
+        Session() = delete;
+        Session(Session*) = delete;
 
         tcp::socket& socket()
         {
@@ -163,7 +179,7 @@ private:
 
                 // Парсим json, который пришёл нам в сообщении.
                 auto j = nlohmann::json::parse(data_);
-                auto reqType = j["ReqType"];
+                std::string reqType = std::string(j["ReqType"]);
 
                 std::string reply = "Error! Unknown request type";
                 if (reqType == Requests::Registration)
@@ -172,22 +188,20 @@ private:
                     // Добавляем нового пользователя и возвращаем его ID.
                     reply = parent.RegisterNewUser(j["Message"]);
                 }
-                else if (reqType == Requests::Hello)
-                {
-                    // Это реквест на приветствие.
-                    // Находим имя пользователя по ID и приветствуем его по имени.
-                    reply = "Hello, " + parent.GetUserName(std::stoi(std::string(j["UserId"]))) + "!\n";
-                }
                 else if (reqType == Requests::AddOrder)
                 {
                     //
                     auto msg = nlohmann::json::parse(std::string(j["Message"]));
-                    std::cerr << j << std::endl << msg["OrderType"] << std::endl;
                     reply = parent.addOrder(
                         std::stoi(std::string(j["UserId"])),
                         std::stod(std::string(msg["Price"])),
                         std::stod(std::string(msg["Amount"])),
                         orderType(msg["OrderType"]) );
+                }
+                else if (reqType == Requests::CheckBalance)
+                {
+                    //
+                    reply = parent.getBalance(std::stoi(std::string(j["UserId"])));
                 }
                 strcpy(data_, reply.c_str());
 

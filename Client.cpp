@@ -70,8 +70,8 @@ public:
             std::cout << "Menu:\n"
                 "1) Buy Order\n"
                 "2) Sell Order\n"
-                "4) Exit\n"
-                << std::endl;
+                "3) Check Balance\n"
+                "4) Exit\n";
 
             short menu_option_num;
             std::cin >> menu_option_num;
@@ -81,25 +81,30 @@ public:
             case 1:
             {
                 ot = orderType::buy;
-                //no break here, executing code for case 2
+                //no break here, executing code from case 2
             }
             case 2: 
             {
-                  std::string price;
-                  std::string amount;
-                  std::cout << "Please enter desired price: ";
-                  std::cin >> price;
-                  std::cout << "Please enter amount: ";
-                  std::cin >> amount;
-                  nlohmann::json msg;
-                  msg["Price"] = price;
-                  msg["Amount"] = amount;
-                  msg["OrderType"] = ot;
-                  std::string message = msg.dump(); 
-                  std::cerr << message << std::endl;
-                  SendMessage(socket, myId, Requests::AddOrder, message);
-                  std::cout << ReadMessage(socket) << std::endl;
-                  break;
+                std::string price;
+                std::string amount;
+                std::cout << "Please enter desired price: ";
+                std::cin >> price;
+                std::cout << "Please enter amount: ";
+                std::cin >> amount;
+                nlohmann::json msg;
+                msg["Price"] = price;
+                msg["Amount"] = amount;
+                msg["OrderType"] = ot;
+                std::string message = msg.dump(); 
+                SendMessage(socket, myId, Requests::AddOrder, message);
+                std::cout << ReadMessage(socket) << std::endl;
+                break;
+            }
+            case 3:
+            {
+                SendMessage(socket, myId, Requests::CheckBalance, "");
+                std::cout << ReadMessage(socket) << std::endl;
+                break;
             }
             case 4:
             {
