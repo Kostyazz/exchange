@@ -68,25 +68,40 @@ public:
         {
             // Тут реализовано "бесконечное" меню.
             std::cout << "Menu:\n"
-                "1) Hello Request\n"
-                "2) Exit\n"
+                "1) Buy Order\n"
+                "2) Sell Order\n"
+                "4) Exit\n"
                 << std::endl;
 
             short menu_option_num;
             std::cin >> menu_option_num;
+            orderType ot = orderType::sell;
             switch (menu_option_num)
             {
             case 1:
             {
-                // Для примера того, как может выглядить взаимодействие с сервером
-                // реализован один единственный метод - Hello.
-                // Этот метод получает от сервера приветствие с именем клиента,
-                // отправляя серверу id, полученный при регистрации.
-                SendMessage(socket, myId, Requests::Hello, "");
-                std::cout << ReadMessage(socket);
-                break;
+                ot = orderType::buy;
+                //no break here, executing code for case 2
             }
-            case 2:
+            case 2: 
+            {
+                  std::string price;
+                  std::string amount;
+                  std::cout << "Please enter desired price: ";
+                  std::cin >> price;
+                  std::cout << "Please enter amount: ";
+                  std::cin >> amount;
+                  nlohmann::json msg;
+                  msg["Price"] = price;
+                  msg["Amount"] = amount;
+                  msg["OrderType"] = ot;
+                  std::string message = msg.dump(); 
+                  std::cerr << message << std::endl;
+                  SendMessage(socket, myId, Requests::AddOrder, message);
+                  std::cout << ReadMessage(socket) << std::endl;
+                  break;
+            }
+            case 4:
             {
                 exit(0);
                 break;
