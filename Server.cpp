@@ -7,7 +7,6 @@
 #include <shared_mutex>
 #include <map>
 
-
 using boost::asio::ip::tcp;
 
 class Server
@@ -15,7 +14,7 @@ class Server
 private:    
     struct Order {
     public:
-        static std::atomic<size_t> orderId;
+        static std::atomic<size_t> orderIdCounter;
         size_t id_;
         size_t userId_;
         double price_;
@@ -26,7 +25,7 @@ private:
             price_(price),
             amount_(amount),
             type_(type),
-            id_(++orderId)
+            id_(++orderIdCounter)
         {}
         Order() = delete;
         Order(Order*) = delete;
@@ -34,14 +33,15 @@ private:
 
     struct User {
     public:
-        static std::atomic<size_t> userId;
+        static std::atomic<size_t> userIdCounter;
         size_t id_;
         std::string name_;
         double usdBalance = 0;
         double rubBalance = 0;
+        std::vector<std::string> deals;
         User(std::string name) :
             name_(name),
-            id_(++userId)
+            id_(++userIdCounter)
         {}
         User() = delete;
         User(User*) = delete;
@@ -50,9 +50,10 @@ private:
     // <UserId, UserName>
     std::map<size_t, std::shared_ptr<User> > mUsers;
     std::shared_mutex mUsersMutex;
-    // <price, *order>
+    // <price, order*>
     std::multimap<double, std::shared_ptr<Order>, std::greater<double> > mBuyOrders;
     std::multimap<double, std::shared_ptr<Order> > mSellOrders;
+    //<UserId, order*>
     std::multimap<size_t, std::shared_ptr<Order> > mUserOrders;
     std::shared_mutex mOrdersMutex;
     boost::asio::io_service& io_service_;
@@ -65,16 +66,45 @@ private:
         std::shared_ptr<User> newUser(std::make_shared<User>(aUserName));
         size_t newUserId = newUser->id_;
         mUsers[newUserId] = newUser;
-
         mUsersMutex.unlock();
+
         return std::to_string(newUserId);
+    }
+
+    int removeOrder(std::shared_ptr<Order> order) {
+        //mutex locks before and after this function call
+        auto mUitPair = mUserOrders.equal_range(order->userId_);
+        auto mUit = mUitPair.first;
+        auto mUitEnd = mUitPair.second;
+        bool typeIsBuy = order->type_ == orderType::buy;
+        for ( ; mUit != mUitEnd; mUit++) {
+            if (mUit->second == order) {
+                mUserOrders.erase(mUit);
+                break;
+            }
+        }
+        auto itPair = mSellOrders.equal_range(order->price_);
+        if (typeIsBuy) {
+            itPair = mBuyOrders.equal_range(order->price_);
+        }
+        auto it = itPair.first;
+        auto itEnd = itPair.second;
+        for ( ; it != itEnd; it++) {
+            if (it->second == order) {
+                if (typeIsBuy)
+                    mBuyOrders.erase(it);
+                else
+                    mSellOrders.erase(it);
+                return 0;
+            }
+        }
+        return 1;
     }
 
     //обработка сделок с новой заявкой
     void processNewOrder(std::shared_ptr<Order> newOrder) {
-        //mutex locks before and after this function call
+        //mOrderMutex locks before and after this function call
         
-
         //check buy orders multimap by default
         auto it = mBuyOrders.begin();
         auto itEnd = mBuyOrders.end();
@@ -92,56 +122,111 @@ private:
             double amount = std::min(oldOrder->amount_, newOrder->amount_);
             oldOrder->amount_ -= amount;
             newOrder->amount_ -= amount;
-            if (typeIsBuy) {
-                mUsers[oldOrder->userId_]->usdBalance -= amount;
-                mUsers[oldOrder->userId_]->rubBalance += price * amount;
-                mUsers[newOrder->userId_]->usdBalance += amount;
-                mUsers[newOrder->userId_]->rubBalance -= price * amount;                
-            } else {
-                mUsers[oldOrder->userId_]->usdBalance += amount;
-                mUsers[oldOrder->userId_]->rubBalance -= price * amount;
-                mUsers[newOrder->userId_]->usdBalance -= amount;
-                mUsers[newOrder->userId_]->rubBalance += price * amount;
-            }
-            //TODO notify users
             if (oldOrder->amount_ <= 0) {
                 if (typeIsBuy)
                     it = mSellOrders.erase(it);
                 else
                     it = mBuyOrders.erase(it);
+                removeOrder(oldOrder);
             } else
                 it++;
+
+            std::string deal = std::to_string(amount) + " USD for " +
+                               std::to_string(price) + " RUB per unit, " +
+                               std::to_string(amount * price) + " RUB total.";
+            mUsersMutex.lock();
+            if (typeIsBuy) {
+                mUsers[newOrder->userId_]->deals.push_back("Bought " + deal);
+                mUsers[oldOrder->userId_]->deals.push_back("Sold " + deal);
+            } else {
+                mUsers[newOrder->userId_]->deals.push_back("Sold " + deal);
+                mUsers[oldOrder->userId_]->deals.push_back("Bought " + deal);
+            }
+            if (typeIsBuy)
+                amount = -amount;
+            mUsers[oldOrder->userId_]->usdBalance += amount;
+            mUsers[oldOrder->userId_]->rubBalance -= price * amount;
+            mUsers[newOrder->userId_]->usdBalance -= amount;
+            mUsers[newOrder->userId_]->rubBalance += price * amount;
+            mUsersMutex.unlock();
+
+            //TODO notify users
         }
     }
 
     //Регистрация новой заявки
     std::string addOrder(size_t userId, double price, double amount, orderType type) {
         std::shared_ptr<Order> newOrder = std::make_shared<Order>(userId, price, amount, type);
+        
         mOrdersMutex.lock();
-
-        mUserOrders.insert({ userId, newOrder });
         processNewOrder(newOrder);
         if (newOrder->amount_ > 0) {
+            mUserOrders.insert({ userId, newOrder });
             if (type == sell) {
                 mSellOrders.insert({ price, newOrder });
-            }
-            else {
+            } else {
                 mBuyOrders.insert({ price, newOrder });
             }
         }
-
         mOrdersMutex.unlock();
-        return "Your order has been processed succesfully";
+
+        return "Your order id is: " + std::to_string(newOrder->id_);
+    }
+
+    //
+    std::string getActiveOrders(size_t userId) {
+        std::string s;
+        auto itPair = mUserOrders.equal_range(userId);
+        auto it = itPair.first;
+        auto itEnd = itPair.second;
+        for (; it != itEnd; it++) {
+            std::shared_ptr<Order> order = it->second;
+            s = s + (order->type_ == buy ? "Buy" : "Sell") +
+                " order no " + std::to_string(order->id_) +
+                ". " + std::to_string(order->amount_) +
+                " USD for " + std::to_string(order->price_) +
+                " RUB per unit.\n";
+        }
+        if (s.empty())
+            s = "You have no active orders.";
+        return s;
     }
 
     std::string getBalance(size_t userId) {
         std::shared_ptr<User> user = mUsers[userId];
+
         mUsersMutex.lock_shared();
-
         std::string retValue = "Your balance is: " + std::to_string(user->rubBalance) + " RUB, " + std::to_string(user->usdBalance) + " USD.";
-
         mUsersMutex.unlock_shared();
+
         return retValue;
+    }
+
+    std::string cancelOrder(size_t userId, size_t orderId) {
+        auto itPair = mUserOrders.equal_range(userId);
+        auto it = itPair.first;
+        auto itEnd = itPair.second;
+        for (; it != itEnd; it++) {
+            if (it->second->id_ == orderId) {
+                mOrdersMutex.lock();
+                int result = removeOrder(it->second);
+                mOrdersMutex.unlock();
+                return "Order " + std::to_string(orderId) + " removed";
+            }
+        }
+        return "Order not found";
+    }
+
+    std::string getDealHistory(size_t userId) {
+        std::string s;
+        mUsersMutex.lock_shared();
+        std::vector<std::string>* deals = &mUsers[userId]->deals;
+        for (auto it = deals->begin(); it != deals->end(); it++) {
+            s = s + *it + "\n";
+        }
+        mUsersMutex.unlock_shared();
+
+        return s;
     }
 
     class Session
@@ -150,6 +235,7 @@ private:
         Session(Server& outer, boost::asio::io_service& io_service)
             : socket_(io_service),
             data_(""),
+            userId(-1),
             parent(outer)
         {
         }
@@ -187,6 +273,7 @@ private:
                     // Это реквест на регистрацию пользователя.
                     // Добавляем нового пользователя и возвращаем его ID.
                     reply = parent.RegisterNewUser(j["Message"]);
+                    userId = std::stoi(reply);
                 }
                 else if (reqType == Requests::AddOrder)
                 {
@@ -202,6 +289,21 @@ private:
                 {
                     //
                     reply = parent.getBalance(std::stoi(std::string(j["UserId"])));
+                }
+                else if (reqType == Requests::CancelOrder)
+                {
+                    //
+                    reply = parent.cancelOrder(std::stoi(std::string(j["UserId"])), std::stoi(std::string(j["Message"])));
+                }
+                else if (reqType == Requests::getActiveOrders)
+                {
+                    //
+                    reply = parent.getActiveOrders(std::stoi(std::string(j["UserId"])));
+                }
+                else if (reqType == Requests::getDealHistory)
+                {
+                    //
+                    reply = parent.getDealHistory(std::stoi(std::string(j["UserId"])));
                 }
                 strcpy(data_, reply.c_str());
 
@@ -235,6 +337,7 @@ private:
         tcp::socket socket_;
         char data_[MAX_LENGTH];
         Server& parent;
+        size_t userId;
     };
 
 public:
@@ -269,8 +372,8 @@ public:
 
 };
 
-std::atomic<size_t> Server::Order::orderId = 0;
-std::atomic<size_t> Server::User::userId = 0;
+std::atomic<size_t> Server::Order::orderIdCounter = 0;
+std::atomic<size_t> Server::User::userIdCounter = 0;
 
 int main()
 {

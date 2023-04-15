@@ -71,50 +71,74 @@ public:
                 "1) Buy Order\n"
                 "2) Sell Order\n"
                 "3) Check Balance\n"
-                "4) Exit\n";
+                "4) Cancel Order\n"
+                "5) Get Active Orders\n"
+                "6) Get Deal History\n"
+                "0) Exit\n";
 
             short menu_option_num;
             std::cin >> menu_option_num;
             orderType ot = orderType::sell;
             switch (menu_option_num)
             {
-            case 1:
-            {
-                ot = orderType::buy;
-                //no break here, executing code from case 2
-            }
-            case 2: 
-            {
-                std::string price;
-                std::string amount;
-                std::cout << "Please enter desired price: ";
-                std::cin >> price;
-                std::cout << "Please enter amount: ";
-                std::cin >> amount;
-                nlohmann::json msg;
-                msg["Price"] = price;
-                msg["Amount"] = amount;
-                msg["OrderType"] = ot;
-                std::string message = msg.dump(); 
-                SendMessage(socket, myId, Requests::AddOrder, message);
-                std::cout << ReadMessage(socket) << std::endl;
-                break;
-            }
-            case 3:
-            {
-                SendMessage(socket, myId, Requests::CheckBalance, "");
-                std::cout << ReadMessage(socket) << std::endl;
-                break;
-            }
-            case 4:
-            {
-                exit(0);
-                break;
-            }
-            default:
-            {
-                std::cout << "Unknown menu option\n" << std::endl;
-            }
+                case 1:
+                {
+                    ot = orderType::buy;
+                    //no break here, executing code from case 2
+                }
+                case 2: 
+                {
+                    std::string price;
+                    std::string amount;
+                    std::cout << "Please enter desired price: ";
+                    std::cin >> price;
+                    std::cout << "Please enter amount: ";
+                    std::cin >> amount;
+                    nlohmann::json msg;
+                    msg["Price"] = price;
+                    msg["Amount"] = amount;
+                    msg["OrderType"] = ot;
+                    std::string message = msg.dump(); 
+                    SendMessage(socket, myId, Requests::AddOrder, message);
+                    std::cout << ReadMessage(socket) << std::endl;
+                    break;
+                }
+                case 3:
+                {
+                    SendMessage(socket, myId, Requests::CheckBalance, "");
+                    std::cout << ReadMessage(socket) << std::endl;
+                    break;
+                }
+                case 4:
+                {
+                    std::string orderId;
+                    std::cout << "Please enter order id to cancel: ";
+                    std::cin >> orderId;
+                    SendMessage(socket, myId, Requests::CancelOrder, orderId);
+                    std::cout << ReadMessage(socket) << std::endl;
+                    break;
+                }
+                case 5:
+                {
+                    SendMessage(socket, myId, Requests::getActiveOrders, "");
+                    std::cout << ReadMessage(socket) << std::endl;
+                    break;
+                }
+                case 6:
+                {
+                    SendMessage(socket, myId, Requests::getDealHistory, "");
+                    std::cout << ReadMessage(socket) << std::endl;
+                    break;
+                }
+                case 0:
+                {
+                    exit(0);
+                    break;
+                }
+                default:
+                {
+                    std::cout << "Unknown menu option\n" << std::endl;
+                }
             }
         }
     }
