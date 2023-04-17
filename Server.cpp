@@ -173,7 +173,6 @@ private:
         return "Your order id is: " + std::to_string(newOrder->id_);
     }
 
-    //
     std::string getActiveOrders(size_t userId) {
         std::string s;
         auto itPair = mUserOrders.equal_range(userId);
@@ -181,7 +180,7 @@ private:
         auto itEnd = itPair.second;
         for (; it != itEnd; it++) {
             std::shared_ptr<Order> order = it->second;
-            s = s + (order->type_ == buy ? "Buy" : "Sell") +
+            s = s + (order->type_ == orderType::buy ? "Buy " : "Sell") +
                 " order no " + std::to_string(order->id_) +
                 ". " + std::to_string(order->amount_) +
                 " USD for " + std::to_string(order->price_) +
@@ -226,8 +225,24 @@ private:
         }
         mUsersMutex.unlock_shared();
 
-        return s;
+		if (s.empty()) 
+			return "Your deal history is empty";
+		else
+			return s;
     }
+
+	std::string getCurrentPrices() {
+		std::string s;
+		if (mSellOrders.empty())
+			s = "Buy price unknown\n";
+		else
+			s = "Buy price = " + std::to_string(mSellOrders.begin()->first) + " RUB\n";
+		if (mBuyOrders.empty())
+			s = s + "Sell price unknown\n";
+		else
+			s = s + "Sell price = " + std::to_string(mBuyOrders.begin()->first) + " RUB";
+		return s;
+	}
 
     class Session
     {
@@ -305,6 +320,11 @@ private:
                     //
                     reply = parent.getDealHistory(std::stoi(std::string(j["UserId"])));
                 }
+				else if (reqType == Requests::getCurrentPrices)
+				{
+					//
+					reply = parent.getCurrentPrices();
+				}
                 strcpy(data_, reply.c_str());
 
                 boost::asio::async_write(socket_,

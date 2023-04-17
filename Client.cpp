@@ -74,6 +74,7 @@ public:
                 "4) Cancel Order\n"
                 "5) Get Active Orders\n"
                 "6) Get Deal History\n"
+				"7) Get Current Prices\n"
                 "0) Exit\n";
 
             short menu_option_num;
@@ -130,6 +131,12 @@ public:
                     std::cout << ReadMessage(socket) << std::endl;
                     break;
                 }
+				case 7:
+				{
+					SendMessage(socket, myId, Requests::getCurrentPrices, "");
+					std::cout << ReadMessage(socket) << std::endl;
+					break;
+				}
                 case 0:
                 {
                     exit(0);

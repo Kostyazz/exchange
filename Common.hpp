@@ -17,6 +17,7 @@ namespace Requests
     static std::string CancelOrder = "Can";
     static std::string getActiveOrders = "Act";
     static std::string getDealHistory = "His";
+	static std::string getCurrentPrices = "Pri";
 }
 
 #endif //CLIENSERVERECN_COMMON_HPP
