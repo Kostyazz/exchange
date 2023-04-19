@@ -28,7 +28,8 @@ private:
             id_(++orderIdCounter)
         {}
         Order() = delete;
-        Order(Order*) = delete;
+        Order(const Order&) = delete;
+		Order& operator= (const Order&) = delete;
     };
 
     struct User {
@@ -44,7 +45,8 @@ private:
             id_(++userIdCounter)
         {}
         User() = delete;
-        User(User*) = delete;
+        User(const User&) = delete;
+		User& operator= (const User&) = delete;
     };
 
     // <UserId, UserName>
@@ -255,7 +257,8 @@ private:
         {
         }
         Session() = delete;
-        Session(Session*) = delete;
+        Session(const Session&) = delete;
+		Session& operator= (const Session&) = delete;
 
         tcp::socket& socket()
         {
@@ -360,6 +363,23 @@ private:
         size_t userId;
     };
 
+	void handle_accept(Session* new_session,
+		const boost::system::error_code& error)
+	{
+		if (!error)
+		{
+			new_session->start();
+			new_session = new Session(*this, io_service_);
+			acceptor_.async_accept(new_session->socket(),
+				boost::bind(&Server::handle_accept, this, new_session,
+					boost::asio::placeholders::error));
+		}
+		else
+		{
+			delete new_session;
+		}
+	}
+
 public:
     Server(boost::asio::io_service& io_service)
         : io_service_(io_service),
@@ -372,24 +392,9 @@ public:
             boost::bind(&Server::handle_accept, this, new_session,
                 boost::asio::placeholders::error));
     }
-
-    void handle_accept(Session* new_session,
-        const boost::system::error_code& error)
-    {
-        if (!error)
-        {
-            new_session->start();
-            new_session = new Session(*this, io_service_);
-            acceptor_.async_accept(new_session->socket(),
-                boost::bind(&Server::handle_accept, this, new_session,
-                    boost::asio::placeholders::error));
-        }
-        else
-        {
-            delete new_session;
-        }
-    }
-
+	Server() = delete;
+	Server(const Server&) = delete;
+	Server& operator= (const Server&) = delete;
 };
 
 std::atomic<size_t> Server::Order::orderIdCounter = 0;
